@@ -8,6 +8,9 @@
 *.so
 *.dylib
 
+# Build directory
+build/*
+
 # Test binary, built with `go test -c`
 *.test
 
@@ -19,3 +22,7 @@
 
 # Go workspace file
 go.work
+
+# Env files
+.env
+.env*
