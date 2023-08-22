@@ -58,6 +58,7 @@ func ScanCommand() cli.Command {
 			table := tablewriter.NewWriter(os.Stdout)
 			table.SetHeader([]string{"Name", "Created At", "Last commit", "Stars / Forks", "License", "Language", "Default Branch", "Status"})
 			table.SetAutoWrapText(false)
+			table.SetColumnAlignment([]int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_RIGHT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT})
 
 			for {
 				var q query
@@ -99,7 +100,11 @@ func ScanCommand() cli.Command {
 					}
 
 					if len(repo.DefaultBranchRef.Target.Commit.History.Edges) > 0 {
-						lastCommit = repo.DefaultBranchRef.Target.Commit.History.Edges[0].Node.CommittedDate.Format("2006-01-02")
+						//lastCommit = repo.DefaultBranchRef.Target.Commit.History.Edges[0].Node.CommittedDate.Format("2006-01-02")
+						date := repo.DefaultBranchRef.Target.Commit.History.Edges[0].Node.CommittedDate.Time
+						today := time.Now()
+						days := today.Sub(date).Hours() / 24
+						lastCommit = fmt.Sprintf("%.0f days ago", days)
 					}
 
 					table.Append([]string{
