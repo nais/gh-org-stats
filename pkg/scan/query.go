@@ -47,7 +47,7 @@ type query struct {
 				EndCursor   githubv4.String
 				HasNextPage githubv4.Boolean
 			}
-		} `graphql:"repositories(orderBy: {field: CREATED_AT, direction: DESC}, privacy: PUBLIC, isArchived:false, first: $limit)"`
+		} `graphql:"repositories(orderBy: {field: CREATED_AT, direction: DESC}, privacy: PUBLIC, isArchived:false, first: $limit, after: $cursor)"`
 	} `graphql:"organization(login: $org)"`
 	Viewer struct {
 		Login      githubv4.String

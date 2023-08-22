@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/olekukonko/tablewriter"
 	"github.com/shurcooL/githubv4"
@@ -11,6 +12,12 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/nais/gh-org-stats/pkg/config"
+)
+
+var (
+	queryLimit       = 100
+	queryTimeout     = 20 * time.Second
+	queryRetryFactor = 5 * time.Second
 )
 
 func ScanCommand() cli.Command {
@@ -35,58 +42,86 @@ func ScanCommand() cli.Command {
 			src := oauth2.StaticTokenSource(
 				&oauth2.Token{AccessToken: cfg.GitHubToken},
 			)
-			httpClient := oauth2.NewClient(ctx, src)
+
+			cctx, cancel := context.WithTimeout(ctx, queryTimeout)
+			defer cancel()
+			httpClient := oauth2.NewClient(cctx, src)
 
 			client := githubv4.NewClient(httpClient)
 
-			var q query
 			variables := map[string]interface{}{
-				"org":   githubv4.String(c.String("org")),
-				"limit": githubv4.Int(10),
-			}
-
-			err = client.Query(ctx, &q, variables)
-			if err != nil {
-				return err
+				"org":    githubv4.String(c.String("org")),
+				"limit":  githubv4.Int(queryLimit),
+				"cursor": (*githubv4.String)(nil), // Null after argument to get first page.
 			}
 
 			table := tablewriter.NewWriter(os.Stdout)
 			table.SetHeader([]string{"Name", "Created At", "Fork Count", "Stargazer Count", "License", "PR Count", "Default Branch", "Status", "Last Commit"})
 			table.SetAutoWrapText(false)
 
-			for _, repo := range q.Organization.Repositories.Nodes {
-				var status string
-				var lastCommit string
+			for {
+				var q query
 
-				if repo.DefaultBranchRef.Target.Commit.Status.State == "SUCCESS" {
-					status = "✔"
-				} else {
-					status = "✘"
+				retries := 5
+				for retries > 0 {
+					cctx, cancel := context.WithTimeout(ctx, queryTimeout)
+					defer cancel()
+
+					err = client.Query(cctx, &q, variables)
+					if err != nil {
+						fmt.Println(err.Error())
+
+						sleep := time.Duration(2*retries) * queryRetryFactor
+
+						fmt.Printf("Error: %v, Retrying in %d seconds...\n", err, sleep)
+						time.Sleep(sleep)
+						retries--
+						continue
+					}
+
+					break
 				}
 
-				if len(repo.DefaultBranchRef.Target.Commit.History.Edges) > 0 {
-					lastCommit = repo.DefaultBranchRef.Target.Commit.History.Edges[0].Node.CommittedDate.Format("2006-01-02 15:04:05")
+				for _, repo := range q.Organization.Repositories.Nodes {
+					var status string
+					var lastCommit string
+
+					if repo.DefaultBranchRef.Target.Commit.Status.State == "SUCCESS" {
+						status = "✔"
+					} else {
+						status = "✘"
+					}
+
+					if len(repo.DefaultBranchRef.Target.Commit.History.Edges) > 0 {
+						lastCommit = repo.DefaultBranchRef.Target.Commit.History.Edges[0].Node.CommittedDate.Format("2006-01-02 15:04:05")
+					}
+
+					table.Append([]string{
+						string(repo.Name),
+						repo.CreatedAt.Format("2006-01-02"),
+						fmt.Sprintf("%d", repo.ForkCount),
+						fmt.Sprintf("%d", repo.StargazerCount),
+						string(repo.LicenseInfo.Name),
+						fmt.Sprintf("%d", repo.PullRequests.TotalCount),
+						string(repo.DefaultBranchRef.Name),
+						status,
+						lastCommit,
+					})
 				}
 
-				table.Append([]string{
-					string(repo.Name),
-					repo.CreatedAt.Format("2006-01-02"),
-					fmt.Sprintf("%d", repo.ForkCount),
-					fmt.Sprintf("%d", repo.StargazerCount),
-					string(repo.LicenseInfo.Name),
-					fmt.Sprintf("%d", repo.PullRequests.TotalCount),
-					string(repo.DefaultBranchRef.Name),
-					status,
-					lastCommit,
-				})
+				if !q.Organization.Repositories.PageInfo.HasNextPage {
+					fmt.Printf("Rate limit: %d/%d\n", q.RateLimit.Remaining, q.RateLimit.Limit)
+					break
+				}
+
+				fmt.Printf("Cursor: %s, RateLimit: %d\n", q.Organization.Repositories.PageInfo.EndCursor, q.RateLimit.Remaining)
+
+				variables["cursor"] = githubv4.NewString(q.Organization.Repositories.PageInfo.EndCursor)
 			}
 
 			table.Render()
 
-			fmt.Printf("\nRate limit: %d/%d\n", q.RateLimit.Remaining, q.RateLimit.Limit)
-
 			return nil
-
 		},
 	}
 }
