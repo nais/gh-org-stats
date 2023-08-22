@@ -17,7 +17,7 @@ import (
 var (
 	queryLimit       = 100
 	queryTimeout     = 20 * time.Second
-	queryRetryFactor = 5 * time.Second
+	queryRetryFactor = 2
 )
 
 func ScanCommand() cli.Command {
@@ -56,7 +56,7 @@ func ScanCommand() cli.Command {
 			}
 
 			table := tablewriter.NewWriter(os.Stdout)
-			table.SetHeader([]string{"Name", "Created At", "Fork Count", "Stargazer Count", "License", "PR Count", "Default Branch", "Status", "Last Commit"})
+			table.SetHeader([]string{"Name", "Created At", "Last commit", "Stars / Forks", "License", "Language", "Default Branch", "Status"})
 			table.SetAutoWrapText(false)
 
 			for {
@@ -71,7 +71,7 @@ func ScanCommand() cli.Command {
 					if err != nil {
 						fmt.Println(err.Error())
 
-						sleep := time.Duration(2*retries) * queryRetryFactor
+						sleep := time.Duration(queryRetryFactor) * 5 * time.Second
 
 						fmt.Printf("Error: %v, Retrying in %d seconds...\n", err, sleep)
 						time.Sleep(sleep)
@@ -86,26 +86,31 @@ func ScanCommand() cli.Command {
 					var status string
 					var lastCommit string
 
-					if repo.DefaultBranchRef.Target.Commit.Status.State == "SUCCESS" {
-						status = "✔"
-					} else {
-						status = "✘"
+					status = ""
+					for _, edge := range repo.DefaultBranchRef.Target.Commit.CheckSuit.Edges {
+						if edge.Node.Conclusion == "FAILURE" {
+							status = "✘"
+							break
+						}
+
+						if edge.Node.Conclusion == "SUCCESS" {
+							status = "✔"
+						}
 					}
 
 					if len(repo.DefaultBranchRef.Target.Commit.History.Edges) > 0 {
-						lastCommit = repo.DefaultBranchRef.Target.Commit.History.Edges[0].Node.CommittedDate.Format("2006-01-02 15:04:05")
+						lastCommit = repo.DefaultBranchRef.Target.Commit.History.Edges[0].Node.CommittedDate.Format("2006-01-02")
 					}
 
 					table.Append([]string{
 						string(repo.Name),
 						repo.CreatedAt.Format("2006-01-02"),
-						fmt.Sprintf("%d", repo.ForkCount),
-						fmt.Sprintf("%d", repo.StargazerCount),
+						lastCommit,
+						fmt.Sprintf("%d/%d", repo.StargazerCount, repo.ForkCount),
 						string(repo.LicenseInfo.Name),
-						fmt.Sprintf("%d", repo.PullRequests.TotalCount),
+						string(repo.PrimaryLanguage.Name),
 						string(repo.DefaultBranchRef.Name),
 						status,
-						lastCommit,
 					})
 				}
 

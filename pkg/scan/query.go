@@ -17,7 +17,16 @@ type query struct {
 					Name   githubv4.String
 					Target struct {
 						Commit struct {
-							Status  struct{ State githubv4.String }
+							Status    struct{ State githubv4.String }
+							CheckSuit struct {
+								TotalCount githubv4.Int
+								Edges      []struct {
+									Node struct {
+										Status     githubv4.String
+										Conclusion githubv4.String
+									}
+								}
+							} `graphql:"checkSuites(first: 10)"`
 							History struct {
 								TotalCount githubv4.Int
 								Edges      []struct {
