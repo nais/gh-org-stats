@@ -2,6 +2,24 @@ package scan
 
 import "github.com/shurcooL/githubv4"
 
+type commit struct {
+	Oid           githubv4.GitObjectID
+	CommittedDate githubv4.DateTime
+	Message       githubv4.String
+	Status        struct{ State githubv4.String }
+	CheckSuit     struct {
+		TotalCount githubv4.Int
+		Edges      []checkSuit
+	} `graphql:"checkSuites(first: 10)"`
+}
+
+type checkSuit struct {
+	Node struct {
+		Status     githubv4.String
+		Conclusion githubv4.String
+	}
+}
+
 type query struct {
 	Organization struct {
 		Repositories struct {
@@ -16,28 +34,7 @@ type query struct {
 				DefaultBranchRef struct {
 					Name   githubv4.String
 					Target struct {
-						Commit struct {
-							Status    struct{ State githubv4.String }
-							CheckSuit struct {
-								TotalCount githubv4.Int
-								Edges      []struct {
-									Node struct {
-										Status     githubv4.String
-										Conclusion githubv4.String
-									}
-								}
-							} `graphql:"checkSuites(first: 10)"`
-							History struct {
-								TotalCount githubv4.Int
-								Edges      []struct {
-									Node struct {
-										Oid           githubv4.GitObjectID
-										Message       githubv4.String
-										CommittedDate githubv4.DateTime
-									}
-								}
-							} `graphql:"history(first: 1)"`
-						} `graphql:"... on Commit"`
+						Commit commit `graphql:"... on Commit"`
 					}
 				}
 

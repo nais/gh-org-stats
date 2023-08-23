@@ -3,6 +3,7 @@ package scan
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"time"
 
@@ -20,6 +21,29 @@ var (
 	queryRetryFactor = 2
 )
 
+func daysAgo(t time.Time) int {
+	return int(time.Since(t).Hours() / 24)
+}
+
+func commitStatus(checks []checkSuit) (status string) {
+	for _, check := range checks {
+		if check.Node.Conclusion == "FAILURE" {
+			status = "✘"
+			break
+		}
+
+		if check.Node.Conclusion == "SUCCESS" {
+			status = "✔"
+		}
+	}
+
+	return
+}
+
+func lastCommit(c commit) string {
+	return fmt.Sprintf("%d days ago", daysAgo(c.CommittedDate.Time))
+}
+
 func ScanCommand() cli.Command {
 	return cli.Command{
 		Name:  "scan",
@@ -29,6 +53,11 @@ func ScanCommand() cli.Command {
 				Name:     "org",
 				Usage:    "the name of the organization",
 				Required: true,
+			},
+			cli.IntFlag{
+				Name:  "limit",
+				Usage: "limit the number of repositories to scan",
+				Value: 0,
 			},
 		},
 		Action: func(c *cli.Context) error {
@@ -51,7 +80,7 @@ func ScanCommand() cli.Command {
 
 			variables := map[string]interface{}{
 				"org":    githubv4.String(c.String("org")),
-				"limit":  githubv4.Int(queryLimit),
+				"limit":  githubv4.Int(math.Min(float64(queryLimit), float64(c.Int("limit")))),
 				"cursor": (*githubv4.String)(nil), // Null after argument to get first page.
 			}
 
@@ -59,6 +88,8 @@ func ScanCommand() cli.Command {
 			table.SetHeader([]string{"Name", "Created At", "Last commit", "Stars / Forks", "License", "Language", "Default Branch", "Status"})
 			table.SetAutoWrapText(false)
 			table.SetColumnAlignment([]int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_RIGHT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT})
+
+			var count int
 
 			for {
 				var q query
@@ -72,7 +103,7 @@ func ScanCommand() cli.Command {
 					if err != nil {
 						fmt.Println(err.Error())
 
-						sleep := time.Duration(queryRetryFactor) * 5 * time.Second
+						sleep := time.Duration(queryRetryFactor*retries) * time.Second
 
 						fmt.Printf("Error: %v, Retrying in %d seconds...\n", err, sleep)
 						time.Sleep(sleep)
@@ -84,28 +115,10 @@ func ScanCommand() cli.Command {
 				}
 
 				for _, repo := range q.Organization.Repositories.Nodes {
-					var status string
-					var lastCommit string
+					count++
 
-					status = ""
-					for _, edge := range repo.DefaultBranchRef.Target.Commit.CheckSuit.Edges {
-						if edge.Node.Conclusion == "FAILURE" {
-							status = "✘"
-							break
-						}
-
-						if edge.Node.Conclusion == "SUCCESS" {
-							status = "✔"
-						}
-					}
-
-					if len(repo.DefaultBranchRef.Target.Commit.History.Edges) > 0 {
-						//lastCommit = repo.DefaultBranchRef.Target.Commit.History.Edges[0].Node.CommittedDate.Format("2006-01-02")
-						date := repo.DefaultBranchRef.Target.Commit.History.Edges[0].Node.CommittedDate.Time
-						today := time.Now()
-						days := today.Sub(date).Hours() / 24
-						lastCommit = fmt.Sprintf("%.0f days ago", days)
-					}
+					status := commitStatus(repo.DefaultBranchRef.Target.Commit.CheckSuit.Edges)
+					lastCommit := lastCommit(repo.DefaultBranchRef.Target.Commit)
 
 					table.Append([]string{
 						string(repo.Name),
@@ -119,13 +132,19 @@ func ScanCommand() cli.Command {
 					})
 				}
 
+				// If there's no next page, we're done.
 				if !q.Organization.Repositories.PageInfo.HasNextPage {
 					fmt.Printf("Rate limit: %d/%d\n", q.RateLimit.Remaining, q.RateLimit.Limit)
 					break
 				}
 
-				fmt.Printf("Cursor: %s, RateLimit: %d\n", q.Organization.Repositories.PageInfo.EndCursor, q.RateLimit.Remaining)
+				// If we've reached the limit, we're done.
+				if c.Int("limit") > 0 && count >= c.Int("limit") {
+					fmt.Printf("Rate limit: %d/%d\n", q.RateLimit.Remaining, q.RateLimit.Limit)
+					break
+				}
 
+				fmt.Printf("Cursor: %s, RateLimit: %d\n", q.Organization.Repositories.PageInfo.EndCursor, q.RateLimit.Remaining)
 				variables["cursor"] = githubv4.NewString(q.Organization.Repositories.PageInfo.EndCursor)
 			}
 
