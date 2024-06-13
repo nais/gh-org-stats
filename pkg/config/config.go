@@ -10,22 +10,37 @@ import (
 	"github.com/shurcooL/githubv4"
 	"github.com/urfave/cli"
 	"golang.org/x/oauth2"
+
+	"cloud.google.com/go/bigquery"
 )
 
 type Config struct {
-	GitHubToken string
+	GitHubToken       string
+	GoogleProjectID   string
+	BigqueryDatasetID string
 }
 
-func (c *Config) GitHubClient(ctx context.Context, queryTimeout time.Duration) (context.CancelFunc, *githubv4.Client) {
-	cctx, cancel := context.WithTimeout(ctx, queryTimeout)
+func NewGitHubClient(c *cli.Context, ctx context.Context) (*githubv4.Client, context.CancelFunc) {
+	cctx, cancel := context.WithTimeout(ctx, time.Duration(c.GlobalInt("default-query-timeout"))*time.Second)
 
 	src := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: c.GitHubToken},
+		&oauth2.Token{AccessToken: c.GlobalString("github-token")},
 	)
 
 	httpClient := oauth2.NewClient(cctx, src)
 
-	return cancel, githubv4.NewClient(httpClient)
+	return githubv4.NewClient(httpClient), cancel
+}
+
+func NewBigQueryClient(c *cli.Context, ctx context.Context) (*bigquery.Client, context.CancelFunc, error) {
+	cctx, cancel := context.WithTimeout(ctx, time.Duration(c.GlobalInt("default-query-timeout"))*time.Second)
+
+	client, err := bigquery.NewClient(cctx, c.GlobalString("google-project-id"))
+	if err != nil {
+		return nil, cancel, err
+	}
+
+	return client, cancel, nil
 }
 
 func LoadEnv() error {
